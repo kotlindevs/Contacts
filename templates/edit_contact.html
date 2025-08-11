@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div class="flex items-center justify-center min-h-[calc(100vh-12rem)]">
+        <div class="bg-white p-8 rounded-xl shadow-sm w-full max-w-md">
+            <h2 class="text-2xl font-semibold text-center text-gray-900 mb-6">Modify Contact</h2>
+            
+            <form action="{{ url_for('edit_contact', contact_name=contact['Name']) }}" method="post" class="space-y-4">
+                <!-- Hidden input to pass the original contact name for updates -->
+                <input type="hidden" name="old_contact_name" value="{{ contact['Name'] }}">
+                
+                <div>
+                    <label for="fname" class="block text-sm font-medium text-gray-700">First Name</label>
+                    <div class="mt-1">
+                        <input type="text" id="fname" name="fname" value="{{ contact['Name'].split(' ')[0] }}" required class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="lname" class="block text-sm font-medium text-gray-700">Last Name</label>
+                    <div class="mt-1">
+                        <input type="text" id="lname" name="lname" value="{{ contact['Name'].split(' ')[1:]|join(' ') }}" class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="mobile" class="block text-sm font-medium text-gray-700">Mobile Number</label>
+                    <div class="mt-1">
+                        <input type="text" id="mobile" name="mobile" value="{{ contact['Contact'] }}" required class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-700">Email Address</label>
+                    <div class="mt-1">
+                        <input type="email" id="email" name="email" value="{{ contact['Email'] }}" class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                    </div>
+                </div>
+                
+                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200">
+                    Save Changes
+                </button>
+                <a href="{{ url_for('contacts') }}" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 transition-colors duration-200">
+                    Cancel
+                </a>
+            </form>
+        </div>
+    </div>
+</main>
+{% endblock %}
