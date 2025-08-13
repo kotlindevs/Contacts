@@ -13,14 +13,16 @@
                 <div>
                     <label for="fname" class="block text-sm font-medium text-gray-700">First Name</label>
                     <div class="mt-1">
-                        <input type="text" id="fname" name="fname" value="{{ contact['Name'].split(' ')[0] }}" required class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                        <!-- Use the new 'fname' value from the backend -->
+                        <input type="text" id="fname" name="fname" value="{{ contact['fname'] }}" required class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
                     </div>
                 </div>
                 
                 <div>
                     <label for="lname" class="block text-sm font-medium text-gray-700">Last Name</label>
                     <div class="mt-1">
-                        <input type="text" id="lname" name="lname" value="{{ contact['Name'].split(' ')[1:]|join(' ') }}" class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
+                        <!-- Use the new 'lname' value from the backend -->
+                        <input type="text" id="lname" name="lname" value="{{ contact['lname'] }}" class="block w-full px-4 py-2 border border-gray-200 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors duration-200">
                     </div>
                 </div>
                 
@@ -41,7 +43,7 @@
                 <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200">
                     Save Changes
                 </button>
-                <a href="{{ url_for('contacts') }}" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 transition-colors duration-200">
+                <a href="{{ url_for('contacts') }}" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-colors duration-200">
                     Cancel
                 </a>
             </form>

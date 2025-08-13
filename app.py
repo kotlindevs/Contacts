@@ -6,9 +6,11 @@ import bcrypt
 import re
 import os
 
+
 app = Quart(__name__)
 app.secret_key = os.urandom(24)
 
+# MongoDB connection details
 uname = parser.quote_plus("Rajat")
 passwd = parser.quote_plus("2844")
 cluster = "cluster0.gpq2duh"
@@ -17,9 +19,11 @@ client = motor.AsyncIOMotorClient(url)
 db = client["Contacts"]
 helplines = db["Helplines"]
 accounts = db["Accounts"]
+user_contacts_collection = db["User_contacts"]
 
 
 async def check_user_async(username: str) -> bool:
+    """Checks if a username already exists in the database."""
     try:
         chk_user = await accounts.find_one({"Username": username})
         return chk_user is not None
@@ -29,6 +33,7 @@ async def check_user_async(username: str) -> bool:
 
 
 async def create_user_async(name, username, password, mobile):
+    """Creates a new user account."""
     try:
         hashed_password = bcrypt.hashpw(
             password.encode('utf-8'), bcrypt.gensalt())
@@ -36,117 +41,127 @@ async def create_user_async(name, username, password, mobile):
             "Name": name,
             "Username": username,
             "Password": hashed_password,
-            "Contact": int(mobile) if re.match(r'^\d{10}$', mobile) else None,
-            "Data": []
+            "Contact": mobile
         }
         await accounts.insert_one(user)
         return True
     except Exception as e:
-        print(f"Error while creating account: {e}")
+        print(f"Error while creating user: {e}")
         return False
 
 
-async def verify_password_async(username, password):
+async def validate_user_async(username, password):
+    """Validates user credentials."""
     try:
-        userdata = await accounts.find_one({"Username": username})
-        if userdata:
-            return bcrypt.checkpw(password.encode('utf-8'), userdata["Password"])
+        user = await accounts.find_one({"Username": username})
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['Password']):
+            return True
         return False
     except Exception as e:
-        print(f"Error while verifying password: {e}")
+        print(f"Error while validating user: {e}")
         return False
 
 
-async def get_user_contacts_async(username):
-    user_doc = await accounts.find_one({"Username": username})
-    if user_doc and user_doc.get("Data"):
-        return user_doc["Data"]
-    return []
-
-
-async def create_contact_async(username: str, fname, lname, mobile, email):
+async def get_contacts_async(username: str):
+    """Retrieves contacts for a given username."""
     try:
-        contact_data = {
-            "Name": f"{fname} {lname}".strip(),
-            "Contact": mobile,
-            "Email": email
-        }
-        await accounts.update_one(
-            {"Username": username},
-            {"$push": {"Data": contact_data}}
-        )
-        return True, "Contact created successfully."
+        user_contacts = await user_contacts_collection.find_one({"Username": username})
+        if user_contacts:
+            return user_contacts.get("Contacts", [])
+        return []
     except Exception as e:
-        return False, f"Error creating contact: {e}"
-
-
-async def remove_contact_async(username: str, contact_name):
-    try:
-        await accounts.update_one(
-            {"Username": username},
-            {"$pull": {"Data": {"Name": contact_name}}}
-        )
-        return True, f"Contact '{contact_name}' removed successfully."
-    except Exception as e:
-        return False, f"Error removing contact: {e}"
+        print(f"Error getting contacts: {e}")
+        return []
 
 
 async def get_contact_by_name_async(username: str, contact_name: str):
-    user_doc = await accounts.find_one({"Username": username})
-    if user_doc and user_doc.get("Data"):
-        for contact in user_doc["Data"]:
-            if contact["Name"] == contact_name:
-                return contact
-    return None
-
-
-async def update_contact_async(username: str, old_contact_name: str, new_fname: str, new_lname: str, new_mobile: str, new_email: str):
-    new_contact_name = f"{new_fname} {new_lname}".strip()
+    """Retrieves a specific contact by name."""
     try:
-        await accounts.update_one(
-            {"Username": username, "Data.Name": old_contact_name},
-            {"$set": {
-                "Data.$.Name": new_contact_name,
-                "Data.$.Contact": new_mobile,
-                "Data.$.Email": new_email
-            }}
-        )
-        return True, "Contact updated successfully."
+        user_contacts = await user_contacts_collection.find_one({"Username": username})
+        if user_contacts:
+            for contact in user_contacts.get("Contacts", []):
+                if contact.get("Name") == contact_name:
+                    return contact
+        return None
     except Exception as e:
-        return False, f"Error updating contact: {e}"
+        print(f"Error getting contact: {e}")
+        return None
+
+
+async def add_contact_async(username, name, mobile, email, job_title, company):
+    """Adds a new contact to the user's list."""
+    try:
+        new_contact = {
+            "Name": name,
+            "Contact": mobile,
+            "Email": email,
+            "Job": job_title,
+            "Company": company
+        }
+        await user_contacts_collection.update_one(
+            {"Username": username},
+            {"$push": {"Contacts": new_contact}},
+            upsert=True
+        )
+        return True, "Contact added successfully."
+    except Exception as e:
+        print(f"Error adding contact: {e}")
+        return False, "An error occurred while adding the contact."
+
+
+async def update_contact_async(username, old_name, new_name, mobile, email, job_title, company):
+    """Updates an existing contact."""
+    try:
+        # Find the user's document
+        user_doc = await user_contacts_collection.find_one({"Username": username})
+        if user_doc:
+            # Find the contact within the contacts array
+            contacts = user_doc.get("Contacts", [])
+            for contact in contacts:
+                if contact.get("Name") == old_name:
+                    # Update the contact details
+                    contact['Name'] = new_name
+                    contact['Contact'] = mobile
+                    contact['Email'] = email
+                    contact['Job'] = job_title  # Add new field
+                    contact['Company'] = company # Add new field
+                    break
+
+            # Update the entire contacts array in the document
+            await user_contacts_collection.update_one(
+                {"Username": username},
+                {"$set": {"Contacts": contacts}}
+            )
+            return True, "Contact updated successfully."
+        return False, "Contact not found."
+    except Exception as e:
+        print(f"Error updating contact: {e}")
+        return False, "An error occurred while updating the contact."
+
+
+async def remove_contact_async(username: str, contact_name: str):
+    """Removes a contact from the user's list."""
+    try:
+        await user_contacts_collection.update_one(
+            {"Username": username},
+            {"$pull": {"Contacts": {"Name": contact_name}}}
+        )
+        return True, "Contact removed successfully."
+    except Exception as e:
+        print(f"Error removing contact: {e}")
+        return False, "An error occurred while removing the contact."
 
 
 @app.route('/')
 async def index():
-    if 'username' in session:
-        return redirect(url_for('contacts'))
     return await render_template('index.html')
-
-
-@app.route('/login', methods=['GET', 'POST'])
-async def login():
-    if 'username' in session:
-        return redirect(url_for('contacts'))
-
-    error = None
-    success = request.args.get('success')
-
-    if request.method == 'POST':
-        form = await request.form
-        username = form.get('username')
-        password = form.get('password')
-
-        if await verify_password_async(username, password):
-            session['username'] = username
-            return redirect(url_for('contacts'))
-
-        error = 'Invalid username or password.'
-
-    return await render_template('index.html', error=error, success=success)
 
 
 @app.route('/register', methods=['GET', 'POST'])
 async def register():
+    if 'username' in session:
+        return redirect(url_for('contacts'))
+
     error = None
     if request.method == 'POST':
         form = await request.form
@@ -156,71 +171,103 @@ async def register():
         mobile = form.get('mobile')
 
         if await check_user_async(username):
-            error = 'Username already exists.'
-            return await render_template('register.html', error=error)
-
-        if await create_user_async(name, username, password, mobile):
-            return redirect(url_for('login', success='Account created successfully!'))
+            error = "Username already exists. Please choose a different one."
         else:
-            error = 'An error occurred during registration.'
-            return await render_template('register.html', error=error)
+            await create_user_async(name, username, password, mobile)
+            return redirect(url_for('login'))
 
-    return await render_template('register.html')
+    return await render_template('register.html', error=error)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+async def login():
+    if 'username' in session:
+        return redirect(url_for('contacts'))
+
+    error = None
+    if request.method == 'POST':
+        form = await request.form
+        username = form.get('username')
+        password = form.get('password')
+
+        if await validate_user_async(username, password):
+            session['username'] = username
+            return redirect(url_for('contacts'))
+        else:
+            error = "Invalid username or password"
+
+    return await render_template('index.html', error=error)
 
 
 @app.route('/contacts')
 async def contacts():
     if 'username' not in session:
         return redirect(url_for('login'))
+    
+    contacts_list = await get_contacts_async(session['username'])
+    return await render_template('contacts.html', contacts=contacts_list)
 
-    user_contacts = await get_user_contacts_async(session['username'])
-    return await render_template('contacts.html', contacts=user_contacts)
 
-
-@app.route('/create_contact', methods=['POST'])
+@app.route('/create_contact', methods=['GET', 'POST'])
 async def create_contact():
     if 'username' not in session:
         return redirect(url_for('login'))
 
-    form = await request.form
-    fname = form.get('fname')
-    lname = form.get('lname')
-    mobile = form.get('mobile')
-    email = form.get('email')
+    if request.method == 'POST':
+        form = await request.form
+        name = form.get('name')
+        mobile = form.get('mobile')
+        email = form.get('email')
+        job_title = form.get('job_title')
+        company = form.get('company')
+        
+        await add_contact_async(session['username'], name, mobile, email, job_title, company)
 
-    if fname and mobile:
-        success, message = await create_contact_async(session['username'], fname, lname, mobile, email)
+        return redirect(url_for('contacts'))
 
-    return redirect(url_for('contacts'))
+    # Render the new create_contact.html file
+    return await render_template('create_contact.html')
 
 
 @app.route('/edit_contact/<contact_name>', methods=['GET', 'POST'])
 async def edit_contact(contact_name):
     if 'username' not in session:
         return redirect(url_for('login'))
-
+    
     contact = await get_contact_by_name_async(session['username'], contact_name)
-    if not contact:
-        return redirect(url_for('contacts'))
 
     if request.method == 'POST':
         form = await request.form
+        old_contact_name = form.get('old_contact_name')
+        # Correctly reconstruct the full name from the form data
         fname = form.get('fname')
         lname = form.get('lname')
+        new_name = f"{fname} {lname}" if lname else fname
         mobile = form.get('mobile')
         email = form.get('email')
+        job_title = form.get('job_title') # Get the new field
+        company = form.get('company')   # Get the new field
 
-        if fname and mobile:
-            success, message = await update_contact_async(
-                session['username'],
-                contact_name,
-                fname,
-                lname,
-                mobile,
-                email
-            )
+        await update_contact_async(
+            session['username'],
+            old_contact_name,
+            new_name,
+            mobile,
+            email,
+            job_title, # Pass the new field
+            company    # Pass the new field
+        )
 
         return redirect(url_for('contacts'))
+
+    # Added logic to handle single-word names gracefully
+    if contact:
+        name_parts = contact['Name'].split(' ', 1)
+        contact['fname'] = name_parts[0]
+        contact['lname'] = name_parts[1] if len(name_parts) > 1 else ''
+    else:
+        # Handle the case where the contact is not found
+        contact = {'fname': '', 'lname': '', 'Contact': '', 'Email': '', 'Job': '', 'Company': ''}
 
     return await render_template('edit_contact.html', contact=contact)
 
@@ -244,6 +291,7 @@ async def logout():
 @app.before_serving
 async def initialize_db():
     try:
+        # Check and seed helplines
         count = await helplines.count_documents({})
         if count == 0:
             print("Database is empty. Seeding with initial contacts...")
@@ -252,9 +300,12 @@ async def initialize_db():
                 {"_id": "0000108", "Name": "Ambulance", "Contact": "108"},
                 {"_id": "0000101", "Name": "Fire Department", "Contact": "101"},
                 {"_id": "00001098", "Name": "Child Helpline", "Contact": "1098"},
-                {"_id": "00001091", "Name": "Women's Helpline", "Contact": "1091"},
-                {"_id": "0000112", "Name": "All-in-One Emergency", "Contact": "112"},
+                {"_id": "00001077", "Name": "Disaster Management", "Contact": "1077"}
             ])
+            print("Seeding complete.")
+        else:
+            print("Database already contains helpline data.")
+
     except Exception as e:
         print(f"Error during database initialization: {e}")
 
