@@ -5,7 +5,7 @@ import urllib.parse as parser
 import bcrypt
 import re
 import os
-
+import datetime
 
 app = Quart(__name__)
 app.secret_key = os.urandom(24)
@@ -20,6 +20,7 @@ db = client["Contacts"]
 helplines = db["Helplines"]
 accounts = db["Accounts"]
 user_contacts_collection = db["User_contacts"]
+trash_collection = db["Trash"] # Collection for deleted contacts
 
 
 async def check_user_async(username: str) -> bool:
@@ -112,22 +113,18 @@ async def add_contact_async(username, name, mobile, email, job_title, company):
 async def update_contact_async(username, old_name, new_name, mobile, email, job_title, company):
     """Updates an existing contact."""
     try:
-        # Find the user's document
         user_doc = await user_contacts_collection.find_one({"Username": username})
         if user_doc:
-            # Find the contact within the contacts array
             contacts = user_doc.get("Contacts", [])
             for contact in contacts:
                 if contact.get("Name") == old_name:
-                    # Update the contact details
                     contact['Name'] = new_name
                     contact['Contact'] = mobile
                     contact['Email'] = email
-                    contact['Job'] = job_title  # Add new field
-                    contact['Company'] = company # Add new field
+                    contact['Job'] = job_title
+                    contact['Company'] = company
                     break
 
-            # Update the entire contacts array in the document
             await user_contacts_collection.update_one(
                 {"Username": username},
                 {"$set": {"Contacts": contacts}}
@@ -139,17 +136,91 @@ async def update_contact_async(username, old_name, new_name, mobile, email, job_
         return False, "An error occurred while updating the contact."
 
 
-async def remove_contact_async(username: str, contact_name: str):
-    """Removes a contact from the user's list."""
+async def move_to_trash_async(username: str, contact_name: str):
+    """Moves a contact to the trash collection."""
     try:
+        user_doc = await user_contacts_collection.find_one({"Username": username})
+        if not user_doc:
+            return False, "User not found."
+
+        contact_to_move = None
+        for contact in user_doc.get("Contacts", []):
+            if contact.get("Name") == contact_name:
+                contact_to_move = contact
+                break
+        
+        if not contact_to_move:
+            return False, "Contact not found."
+
+        trash_item = {
+            "Username": username,
+            "Contact": contact_to_move,
+            "deleted_at": datetime.datetime.utcnow()
+        }
+        await trash_collection.insert_one(trash_item)
+
         await user_contacts_collection.update_one(
             {"Username": username},
             {"$pull": {"Contacts": {"Name": contact_name}}}
         )
-        return True, "Contact removed successfully."
+        return True, "Contact moved to trash successfully."
     except Exception as e:
-        print(f"Error removing contact: {e}")
-        return False, "An error occurred while removing the contact."
+        print(f"Error moving contact to trash: {e}")
+        return False, "An error occurred while moving the contact to trash."
+
+
+async def get_trashed_contacts_async(username: str):
+    """Retrieves trashed contacts for a given username, sorted by deletion date."""
+    try:
+        cursor = trash_collection.find({"Username": username})
+        return await cursor.sort("deleted_at", -1).to_list(length=None)
+    except Exception as e:
+        print(f"Error getting trashed contacts: {e}")
+        return []
+
+
+async def restore_contact_async(username: str, contact_name: str):
+    """Restores a contact from trash back to the user's contact list."""
+    try:
+        trashed_item = await trash_collection.find_one({"Username": username, "Contact.Name": contact_name})
+        if not trashed_item:
+            return False, "Contact not found in trash."
+
+        contact_to_restore = trashed_item['Contact']
+
+        await user_contacts_collection.update_one(
+            {"Username": username},
+            {"$push": {"Contacts": contact_to_restore}},
+            upsert=True
+        )
+
+        await trash_collection.delete_one({"_id": trashed_item["_id"]})
+        return True, "Contact restored successfully."
+    except Exception as e:
+        print(f"Error restoring contact: {e}")
+        return False, "An error occurred while restoring the contact."
+
+
+async def delete_permanently_async(username: str, contact_name: str):
+    """Permanently deletes a contact from the trash."""
+    try:
+        result = await trash_collection.delete_one({"Username": username, "Contact.Name": contact_name})
+        if result.deleted_count == 0:
+            return False, "Contact not found in trash."
+        return True, "Contact permanently deleted."
+    except Exception as e:
+        print(f"Error deleting contact permanently: {e}")
+        return False, "An error occurred while deleting the contact."
+
+
+async def empty_trash_async(username: str):
+    """Permanently deletes all contacts from the trash for a given user."""
+    try:
+        await trash_collection.delete_many({"Username": username})
+        return True, "Trash emptied successfully."
+    except Exception as e:
+        print(f"Error emptying trash: {e}")
+        return False, "An error occurred while emptying the trash."
 
 
 @app.route('/')
@@ -225,7 +296,6 @@ async def create_contact():
 
         return redirect(url_for('contacts'))
 
-    # Render the new create_contact.html file
     return await render_template('create_contact.html')
 
 
@@ -239,14 +309,13 @@ async def edit_contact(contact_name):
     if request.method == 'POST':
         form = await request.form
         old_contact_name = form.get('old_contact_name')
-        # Correctly reconstruct the full name from the form data
         fname = form.get('fname')
         lname = form.get('lname')
         new_name = f"{fname} {lname}" if lname else fname
         mobile = form.get('mobile')
         email = form.get('email')
-        job_title = form.get('job_title') # Get the new field
-        company = form.get('company')   # Get the new field
+        job_title = form.get('job_title')
+        company = form.get('company')
 
         await update_contact_async(
             session['username'],
@@ -254,19 +323,17 @@ async def edit_contact(contact_name):
             new_name,
             mobile,
             email,
-            job_title, # Pass the new field
-            company    # Pass the new field
+            job_title,
+            company
         )
 
         return redirect(url_for('contacts'))
 
-    # Added logic to handle single-word names gracefully
     if contact:
         name_parts = contact['Name'].split(' ', 1)
         contact['fname'] = name_parts[0]
         contact['lname'] = name_parts[1] if len(name_parts) > 1 else ''
     else:
-        # Handle the case where the contact is not found
         contact = {'fname': '', 'lname': '', 'Contact': '', 'Email': '', 'Job': '', 'Company': ''}
 
     return await render_template('edit_contact.html', contact=contact)
@@ -277,9 +344,58 @@ async def remove_contact(contact_name):
     if 'username' not in session:
         return redirect(url_for('login'))
 
-    success, message = await remove_contact_async(session['username'], contact_name)
+    await move_to_trash_async(session['username'], contact_name)
 
     return redirect(url_for('contacts'))
+
+
+@app.route('/trash')
+async def trash_page():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    
+    trashed_docs = await get_trashed_contacts_async(session['username'])
+    
+    # Format the 'deleted_at' timestamp for display
+    for doc in trashed_docs:
+        deleted_time = doc['deleted_at']
+        now = datetime.datetime.utcnow()
+        # Check if the date is today
+        if deleted_time.date() == now.date():
+            # Format as "Today, HH:MM AM/PM"
+            doc['deleted_at_formatted'] = f"Today, {deleted_time.strftime('%I:%M %p')}"
+        else:
+            # Format as "Mon Day, YYYY"
+            doc['deleted_at_formatted'] = deleted_time.strftime('%b %d, %Y')
+
+    return await render_template('trash.html', trashed_docs=trashed_docs)
+
+
+@app.route('/restore_contact/<contact_name>')
+async def restore_contact(contact_name):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    await restore_contact_async(session['username'], contact_name)
+    return redirect(url_for('trash_page'))
+
+
+@app.route('/delete_permanently/<contact_name>')
+async def delete_permanently(contact_name):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    await delete_permanently_async(session['username'], contact_name)
+    return redirect(url_for('trash_page'))
+
+
+@app.route('/empty_trash')
+async def empty_trash():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    
+    await empty_trash_async(session['username'])
+    return redirect(url_for('trash_page'))
 
 
 @app.route('/logout')
@@ -291,7 +407,6 @@ async def logout():
 @app.before_serving
 async def initialize_db():
     try:
-        # Check and seed helplines
         count = await helplines.count_documents({})
         if count == 0:
             print("Database is empty. Seeding with initial contacts...")

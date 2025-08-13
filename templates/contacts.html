@@ -65,7 +65,7 @@
                     </svg>
                     <span>Import</span>
                 </a>
-                <a href="#" class="flex items-center space-x-3 px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors duration-200">
+                <a href="{{ url_for('trash_page') }}" class="flex items-center space-x-3 px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors duration-200">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5">
                         <path d="M3 6h18"></path>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
@@ -366,7 +366,7 @@
                 searchContainer.classList.add('w-full');
             } else {
                 // If closed, open it
-                sidebar.classList.remove('translate-x-full');
+                sidebar.classList.remove('-translate-x-full');
                 sidebar.classList.add('translate-x-0');
                 searchContainer.classList.add('md:w-auto');
                 searchContainer.classList.remove('w-full');
