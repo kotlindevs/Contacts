@@ -1,5 +1,6 @@
 import asyncio
-from quart import Quart, render_template, request, redirect, url_for, session
+from quart import Quart, render_template, request, redirect, url_for, session, jsonify
+from quart_cors import cors
 import motor.motor_asyncio as motor
 import urllib.parse as parser
 import bcrypt
@@ -8,9 +9,9 @@ import os
 import datetime
 
 app = Quart(__name__)
+app = cors(app)
 app.secret_key = os.urandom(24)
 
-# MongoDB connection details
 uname = parser.quote_plus("Rajat")
 passwd = parser.quote_plus("2844")
 cluster = "cluster0.gpq2duh"
@@ -24,7 +25,6 @@ trash_collection = db["Trash"] # Collection for deleted contacts
 
 
 async def check_user_async(username: str) -> bool:
-    """Checks if a username already exists in the database."""
     try:
         chk_user = await accounts.find_one({"Username": username})
         return chk_user is not None
@@ -45,10 +45,10 @@ async def create_user_async(name, username, password, mobile):
             "Contact": mobile
         }
         await accounts.insert_one(user)
-        return True
+        return True, "User created successfully."
     except Exception as e:
         print(f"Error while creating user: {e}")
-        return False
+        return False, "An error occurred while creating the user."
 
 
 async def validate_user_async(username, password):
@@ -225,78 +225,113 @@ async def empty_trash_async(username: str):
 
 @app.route('/')
 async def index():
-    return await render_template('index.html')
+    return jsonify({"message": "Welcome to the Contacts API!"})
 
+@app.route('/api/register', methods=['POST'])
+async def api_register():
+    try:
+        data = await request.get_json()
+        name = data.get('name')
+        username = data.get('username')
+        password = data.get('password')
+        mobile = data.get('mobile')
 
-@app.route('/register', methods=['GET', 'POST'])
-async def register():
-    if 'username' in session:
-        return redirect(url_for('contacts'))
-
-    error = None
-    if request.method == 'POST':
-        form = await request.form
-        name = form.get('name')
-        username = form.get('username')
-        password = form.get('password')
-        mobile = form.get('mobile')
+        if not all([name, username, password, mobile]):
+            return jsonify({"error": "Missing required fields"}), 400
 
         if await check_user_async(username):
-            error = "Username already exists. Please choose a different one."
+            return jsonify({"error": "Username already exists. Please choose a different one."}), 409
+        
+        success, message = await create_user_async(name, username, password, mobile)
+
+        if success:
+            return jsonify({"success": True, "message": "User registered successfully."}), 201
         else:
-            await create_user_async(name, username, password, mobile)
-            return redirect(url_for('login'))
+            return jsonify({"success": False, "error": message}), 500
 
-    return await render_template('register.html', error=error)
+    except Exception as e:
+        print(f"Error in registration API: {e}")
+        return jsonify({"success": False, "error": "An internal server error occurred."}), 500
 
+# Add this new route to your existing app.py file.
+@app.route('/api/login', methods=['POST'])
+async def api_login():
+    """
+    Handles user login via a JSON API call from the frontend.
+    """
+    try:
+        data = await request.get_json()
+        username = data.get('username')
+        password = data.get('password')
 
-@app.route('/login', methods=['GET', 'POST'])
-async def login():
-    if 'username' in session:
-        return redirect(url_for('contacts'))
-
-    error = None
-    if request.method == 'POST':
-        form = await request.form
-        username = form.get('username')
-        password = form.get('password')
+        # Basic input validation
+        if not all([username, password]):
+            return jsonify({"error": "Missing required fields"}), 400
 
         if await validate_user_async(username, password):
-            session['username'] = username
-            return redirect(url_for('contacts'))
+            # In a real-world scenario, you would manage sessions securely.
+            # Here, we'll just return a success message.
+            # You might return a token for the frontend to store.
+            return jsonify({"success": True, "message": "Login successful"}), 200
         else:
-            error = "Invalid username or password"
-
-    return await render_template('index.html', error=error)
-
-
-@app.route('/contacts')
-async def contacts():
-    if 'username' not in session:
-        return redirect(url_for('login'))
+            return jsonify({"success": False, "error": "Invalid username or password"}), 401
     
-    contacts_list = await get_contacts_async(session['username'])
-    return await render_template('contacts.html', contacts=contacts_list)
+    except Exception as e:
+        print(f"Error in login API: {e}")
+        return jsonify({"success": False, "error": "An internal server error occurred."}), 500
 
 
-@app.route('/create_contact', methods=['GET', 'POST'])
-async def create_contact():
-    if 'username' not in session:
-        return redirect(url_for('login'))
 
-    if request.method == 'POST':
-        form = await request.form
-        name = form.get('name')
-        mobile = form.get('mobile')
-        email = form.get('email')
-        job_title = form.get('job_title')
-        company = form.get('company')
+@app.route('/api/contacts', methods=['GET'])
+async def api_contacts():
+    """
+    Handles fetching contacts via a JSON API call from the frontend.
+    It returns a list of contacts for the logged-in user.
+    """
+    try:
+        if 'username' not in session:
+            # Return a JSON error message if the user is not logged in.
+            return jsonify({"error": "User not logged in"}), 401
         
+        # Use the existing function to get the contacts for the current user.
+        contacts_list = await get_contacts_async(session['username'])
+        
+        # Return the list of contacts as a JSON response.
+        return jsonify(contacts_list), 200
+
+    except Exception as e:
+        print(f"Error fetching contacts in API: {e}")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route('/api/create_contact', methods=['POST'])
+async def api_create_contact():
+    """
+    Handles creating a new contact via a JSON API call from the frontend.
+    """
+    try:
+        if 'username' not in session:
+            return jsonify({"error": "User not logged in"}), 401
+        
+        data = await request.get_json()
+        name = data.get('name')
+        mobile = data.get('mobile')
+        email = data.get('email')
+        job_title = data.get('job_title')
+        company = data.get('company')
+        
+        # Basic input validation
+        if not all([name, mobile]):
+            return jsonify({"error": "Name and Mobile are required fields"}), 400
+        
+        # Call the existing function to add the contact
         await add_contact_async(session['username'], name, mobile, email, job_title, company)
-
-        return redirect(url_for('contacts'))
-
-    return await render_template('create_contact.html')
+        
+        return jsonify({"success": True, "message": "Contact created successfully"}), 201
+    
+    except Exception as e:
+        print(f"Error creating contact in API: {e}")
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 @app.route('/edit_contact/<contact_name>', methods=['GET', 'POST'])
